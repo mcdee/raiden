@@ -67,7 +67,7 @@ def tester_state(deploy_key, private_keys, tester_blockgas_limit):
     genesis_overwrite = {
         'nonce': zpad(data_decoder('0x00006d6f7264656e'), 8),
         'difficulty': quantity_decoder('0x20000'),
-        'mixhash': zpad(b'\x00', 32),
+        'mixHash': zpad(b'\x00', 32),
         'coinbase': address_decoder('0x0000000000000000000000000000000000000000'),
         'timestamp': 0,
         'extra_data': b'',
