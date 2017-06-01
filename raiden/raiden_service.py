@@ -171,8 +171,7 @@ class RaidenService(object):
         greenlet_task_dispatcher = GreenletTasksDispatcher()
 
         alarm = AlarmTask(chain)
-        # ignore the blocknumber
-        alarm.register_callback(self.poll_blockchain_events)
+        alarm.register_callback(lambda _: self.poll_blockchain_events())
         alarm.start()
 
         self._blocknumber = alarm.last_block_number
@@ -219,7 +218,7 @@ class RaidenService(object):
     def get_block_number(self):
         return self._blocknumber
 
-    def poll_blockchain_events(self, block_number):  # pylint: disable=unused-argument
+    def poll_blockchain_events(self):
         on_statechange = self.state_machine_event_handler.on_blockchain_statechange
 
         for state_change in self.pyethapp_blockchain_events.poll_state_change():
@@ -597,9 +596,9 @@ class RaidenService(object):
         mediated transfer.
         """
 
-        if not direct_channel.isopen:
+        if not direct_channel.can_transfer:
             log.info(
-                'DIRECT CHANNEL %s > %s is closed',
+                'DIRECT CHANNEL %s > %s is closed or has no funding',
                 pex(direct_channel.our_state.address),
                 pex(direct_channel.partner_state.address),
             )
@@ -657,6 +656,14 @@ class RaidenService(object):
             for route in map(route_to_routestate, routes)
             if route.state == CHANNEL_STATE_OPENED
         ]
+
+        # send ping to target to make sure we can receive something back from target
+        async_result = self.protocol.send_ping(target)
+        async_result.wait(timeout=0.5)  # allow the ping to succeed
+        if async_result.ready():
+            log.debug("transfer target received invitation ping")
+        else:
+            log.debug("transfer target did not receive invitation ping, probably behing NAT")
 
         identifier = create_default_identifier(self.address, token_address, target)
         route_state = RoutesState(available_routes)
@@ -947,7 +954,7 @@ class RaidenMessageHandler(object):
 
         channel = graph.partneraddress_channel[message.sender]
 
-        if not channel.isopen:
+        if channel.state != CHANNEL_STATE_OPENED:
             raise TransferWhenClosed(
                 'Direct transfer received for a closed channel: {}'.format(
                     pex(channel.channel_address),
@@ -976,16 +983,16 @@ class RaidenMessageHandler(object):
 
         if not graph.has_channel(self.raiden.address, message.sender):
             raise UnknownAddress(
-                'Direct transfer from node without an existing channel: {}'.format(
+                'Mediated transfer from node without an existing channel: {}'.format(
                     pex(message.sender),
                 )
             )
 
         channel = graph.partneraddress_channel[message.sender]
 
-        if not channel.isopen:
+        if channel.state != CHANNEL_STATE_OPENED:
             raise TransferWhenClosed(
-                'Direct transfer received for a closed channel: {}'.format(
+                'Mediated transfer received but the channel is closed: {}'.format(
                     pex(channel.channel_address),
                 )
             )
@@ -1030,28 +1037,33 @@ class StateMachineEventHandler(object):
         self.raiden = raiden
 
     def dispatch_to_all_tasks(self, state_change):
-        self.raiden.transaction_log.log(state_change)
+        state_change_id = self.raiden.transaction_log.log(state_change)
         manager_lists = self.raiden.identifier_to_statemanagers.itervalues()
 
         for manager in itertools.chain(*manager_lists):
-            self.dispatch(manager, state_change)
+            events = self.dispatch(manager, state_change)
+            self.raiden.transaction_log.log_events(state_change_id, events)
 
     def dispatch_by_identifier(self, identifier, state_change):
-        self.raiden.transaction_log.log(state_change)
+        state_change_id = self.raiden.transaction_log.log(state_change)
         manager_list = self.raiden.identifier_to_statemanagers[identifier]
 
         for manager in manager_list:
-            self.dispatch(manager, state_change)
+            events = self.dispatch(manager, state_change)
+            self.raiden.transaction_log.log_events(state_change_id, events)
 
     def log_and_dispatch(self, state_manager, state_change):
-        self.raiden.transaction_log.log(state_change)
-        self.dispatch(state_manager, state_change)
+        state_change_id = self.raiden.transaction_log.log(state_change)
+        events = self.dispatch(state_manager, state_change)
+        self.raiden.transaction_log.log_events(state_change_id, events)
 
     def dispatch(self, state_manager, state_change):
         all_events = state_manager.dispatch(state_change)
 
         for event in all_events:
             self.on_event(event)
+
+        return all_events
 
     def on_event(self, event):
         if isinstance(event, SendMediatedTransfer):

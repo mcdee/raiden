@@ -43,26 +43,22 @@ library NettingChannelLibrary {
 
 
     modifier notSettledButClosed(Data storage self) {
-        if (self.settled > 0 || self.closed == 0)
-            throw;
+        require(self.settled <= 0 && self.closed > 0);
         _;
     }
 
     modifier stillTimeout(Data storage self) {
-        if (self.closed + self.settle_timeout < block.number)
-            throw;
+        require(self.closed + self.settle_timeout >= block.number);
         _;
     }
 
     modifier timeoutOver(Data storage self) {
-        if (self.closed + self.settle_timeout > block.number)
-            throw;
+        require(self.closed + self.settle_timeout <= block.number);
         _;
     }
 
     modifier channelSettled(Data storage self) {
-        if (self.settled == 0)
-            throw;
+        require(self.settled != 0);
         _;
     }
 
@@ -87,9 +83,8 @@ library NettingChannelLibrary {
     {
         uint8 index;
 
-        if (self.closed != 0) {
-            throw;
-        }
+        require(self.opened > 0);
+        require(self.closed == 0);
 
         if (self.token.balanceOf(msg.sender) < amount) {
             throw;
@@ -103,10 +98,6 @@ library NettingChannelLibrary {
             balance = participant.balance;
             balance += amount;
             participant.balance = balance;
-
-            if (self.opened == 0) {
-                self.opened = block.number;
-            }
 
             return (true, balance);
         }
@@ -170,9 +161,7 @@ library NettingChannelLibrary {
             }
 
             // the registered message recipient should be the closing party
-            if (recipient != self.closing_address) {
-                throw;
-            }
+            require(recipient == self.closing_address);
 
             counterparty.nonce = nonce;
             counterparty.locksroot = locksroot;
@@ -233,9 +222,7 @@ library NettingChannelLibrary {
         // Note: could have taken msg.sender here but trying to be future-proof
         // for when we allow third party updates
         Participant storage updating_party = self.participants[caller_index];
-        if (updating_party.node_address != recipient) {
-            throw;
-        }
+        require(updating_party.node_address == recipient);
 
         self.participants[closer_index].nonce = nonce;
         self.participants[closer_index].locksroot = locksroot;
@@ -274,9 +261,7 @@ library NettingChannelLibrary {
         }
         counterparty.withdrawn_locks[hashlock] = true;
 
-        if (expiration < block.number) {
-            throw;
-        }
+        require(expiration >= block.number);
 
         if (hashlock != sha3(secret)) {
             throw;
@@ -284,9 +269,7 @@ library NettingChannelLibrary {
 
         h = computeMerkleRoot(locked_encoded, merkle_proof);
 
-        if (counterparty.locksroot != h) {
-            throw;
-        }
+        require(counterparty.locksroot == h);
 
         // This implementation allows for each transfer to be set only once, so
         // it's safe to update the transferred_amount in place.
@@ -308,9 +291,7 @@ library NettingChannelLibrary {
         constant
         returns (bytes32)
     {
-        if (merkle_proof.length % 32 != 0) {
-            throw;
-        }
+        require(merkle_proof.length % 32 == 0);
 
         uint i;
         bytes32 h;
@@ -505,9 +486,7 @@ library NettingChannelLibrary {
         returns (uint64 nonce, address recipient, bytes32 locksroot, uint256 transferred_amount)
     {
         // size of the raw message without the signature
-        if (message.length != 268) {
-            throw;
-        }
+        require(message.length == 268);
 
         // Message format:
         // [0:1] cmdid
@@ -537,9 +516,7 @@ library NettingChannelLibrary {
         returns (uint64 nonce, address recipient, bytes32 locksroot, uint256 transferred_amount)
     {
         // size of the raw message without the signature
-        if (message.length != 196) {
-            throw;
-        }
+        require(message.length == 196);
 
         // Message format:
         // [0:1] cmdid

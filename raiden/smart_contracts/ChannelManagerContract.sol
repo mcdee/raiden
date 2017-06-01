@@ -132,8 +132,15 @@ contract ChannelManagerContract {
     /// @notice Check if a contract exists
     /// @param channel The address to check whether a contract is deployed or not
     /// @return True if a contract exists, false otherwise
-    function contractExists(address channel) private constant returns (bool) {
-        return data.contractExists(channel);
+    function contractExists(address channel) private constant returns (bool exists) {
+        uint size;
+        exists = false;
+        assembly {
+            size := extcodesize(channel)
+        }
+        if (size > 0) {
+            exists = true;
+        }
     }
 
     /// @dev Delete a channel that's been settled
@@ -141,9 +148,7 @@ contract ChannelManagerContract {
     /// @param channel_address The address to be deleted
     function deleteChannel(address partner, address channel_address) private {
         // throw if the channel has already been deleted
-        if (data.getChannelWith(partner) == 0x0) {
-            throw;
-        }
+        assert(data.getChannelWith(partner) != 0x0);
 
         address[] our_channels = node_channels[msg.sender];
         address[] partner_channels = node_channels[partner];
